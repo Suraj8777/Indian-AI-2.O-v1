@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Jarvis AI Assistant</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: Arial, sans-serif;
+            background: #0a0a0a;
+            color: #00ffff;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+        .jarvis-container {
+            width: 400px;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 20px;
+            border-radius: 10px;
+            border: 1px solid #00ffff;
+            box-shadow: 0 0 20px rgba(0, 255, 255, 0.3);
+            z-index: 1;
+        }
+        #language-select {
+            background: #00ffff;
+            color: #000;
+            border: none;
+            padding: 5px;
+            border-radius: 5px;
+            margin-bottom: 10px;
+            width: 100%;
+        }
+        #status {
+            font-size: 1.2em;
+            margin-bottom: 10px;
+            text-align: center;
+            color: #ffffff;
+        }
+        .output {
+            height: 200px;
+            overflow-y: auto;
+            margin-bottom: 20px;
+            padding: 10px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 5px;
+        }
+        button {
+            background: #00ffff;
+            color: #000;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            width: 100%;
+            font-weight: bold;
+            transition: all 0.3s;
+        }
+        button:hover {
+            background: #00cccc;
+            transform: scale(1.05);
+        }
+        button:active {
+            background: #009999;
+        }
+        #background-canvas {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: -1;
+        }
+    </style>
+</head>
+<body>
+    <div class="jarvis-container">
+        <select id="language-select">
+            <option value="en-US">English (US)</option>
+            <option value="es-ES">Spanish (Spain)</option>
+            <option value="fr-FR">French (France)</option>
+            <option value="de-DE">German (Germany)</option>
+            <option value="bn-IN">Bengali (India)</option>
+            <option value="hi-IN">Hindi (India)</option>
+        </select>
+        <div id="status">Ready</div>
+        <div class="output" id="output">JARVIS: Systems online. How may I assist you, sir?</div>
+        <button onclick="startListening()">Speak to JARVIS</button>
+    </div>
+    <canvas id="background-canvas"></canvas>
+
+    <script>
+        const output = document.getElementById('output');
+        const statusDiv = document.getElementById('status');
+        const languageSelect = document.getElementById('language-select');
+        const recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
+        recognition.continuous = false;
+        recognition.interimResults = false;
+
+        let selectedLanguage = languageSelect.value;
+        let appState = 'idle'; // 'idle', 'listening', 'processing'
+        let lastResponse = '';
+
+        languageSelect.addEventListener('change', () => {
+            selectedLanguage = languageSelect.value;
+        });
+
+        const predefinedCommands = [
+            { pattern: /time/i, handler: () => `The current time is ${new Date().toLocaleTimeString()}` },
+            { pattern: /who are you/i, handler: () => 'I am JARVIS, your personal AI assistant, inspired by Mr. Stark\'s creation.' },
+            { pattern: /calculate (.+)/i, handler: (match) => {
+                try {
+                    const result = eval(match[1]);
+                    return `The result is ${result}, sir.`;
+                } catch {
+                    return 'I apologize, sir, but I couldn\'t calculate that.';
+                }
+            }},
+            { pattern: /open (.+)/i, handler: (match) => {
+                const sites = { 'google': 'https://www.google.com', 'youtube': 'https://www.youtube.com', 'wikipedia': 'https://www.wikipedia.org' };
+                const site = match[1].toLowerCase();
+                if (sites[site]) {
+                    window.open(sites[site], '_blank');
+                    return `Opening ${site}, sir.`;
+                }
+                return `I'm sorry, sir, but I don’t have access to open ${site}.`;
+            }},
+            { pattern: /repeat/i, handler: () => lastResponse || 'I have no previous response to repeat, sir.' },
+            { pattern: /help/i, handler: () => 'I can assist with commands like "time", "who are you", "calculate [expression]", "open [site]", and more. For other queries, I’ll consult my external knowledge base.' }
+        ];
+
+        recognition.onresult = async function(event) {
+            const transcript = event.results[0][0].transcript.toLowerCase().trim();
+            output.innerHTML += `<br>YOU: ${transcript}`;
+            setStatus('Processing...');
+            appState = 'processing';
+
+            let response;
+            for (const command of predefinedCommands) {
+                const match = command.pattern.exec(transcript);
+                if (match) {
+                    response = command.handler(match);
+                    break;
+                }
+            }
+
+            if (!response) {
+                try {
+                    const apiResponse = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer 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`
+                        },
+                        body: JSON.stringify({
+                            model: 'meta-llama/llama-3.1-8b-instruct:free',
+                            messages: [
+                                { role: 'system', content: `You are JARVIS, an AI assistant inspired by the Marvel character. Respond in a formal, polite manner, addressing the user as "sir". The user is speaking in ${selectedLanguage}.` },
+                                { role: 'user', content: transcript }
+                            ]
+                        })
+                    });
+
+                    if (apiResponse.ok) {
+                        const data = await apiResponse.json();
+                        response = data.choices[0].message.content;
+                    } else {
+                        response = apiResponse.status === 401 ? 'Authentication failed, sir.' : 'I’m sorry, sir. I couldn’t process that request.';
+                    }
+                } catch (error) {
+                    response = 'Apologies, sir. There was an error processing your request.';
+                }
+            }
+
+            output.innerHTML += `<br>JARVIS: ${response}`;
+            output.scrollTop = output.scrollHeight;
+            lastResponse = response;
+            speak(response);
+            setStatus('Ready');
+            appState = 'idle';
+        };
+
+        recognition.onerror = function(event) {
+            const message = event.error === 'no-speech' ? 'No speech detected, sir.' : 'An error occurred, sir.';
+            output.innerHTML += `<br>JARVIS: ${message}`;
+            setStatus('Ready');
+            appState = 'idle';
+        };
+
+        function startListening() {
+            recognition.lang = selectedLanguage;
+            setStatus('Listening...');
+            appState = 'listening';
+            recognition.start();
+        }
+
+        function setStatus(text) {
+            statusDiv.textContent = text;
+        }
+
+        function speak(text) {
+            const utterance = new SpeechSynthesisUtterance(text);
+            const voices = speechSynthesis.getVoices();
+            let voice = voices.find(v => v.lang === selectedLanguage) || voices.find(v => v.lang.startsWith(selectedLanguage.split('-')[0])) || voices[0];
+            if (!voice) output.innerHTML += '<br>JARVIS: No voice available for the selected language, sir.';
+            utterance.voice = voice;
+            window.speechSynthesis.speak(utterance);
+        }
+
+        // Background Animation
+        const canvas = document.getElementById('background-canvas');
+        const ctx = canvas.getContext('2d');
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+
+        class Particle {
+            constructor() {
+                this.x = Math.random() * canvas.width;
+                this.y = Math.random() * canvas.height;
+                this.vx = (Math.random() - 0.5) * 2;
+                this.vy = (Math.random() - 0.5) * 2;
+            }
+            update() {
+                let speedFactor = appState === 'listening' ? 2 : appState === 'processing' ? 0.5 : 1;
+                this.x += this.vx * speedFactor;
+                this.y += this.vy * speedFactor;
+                if (this.x < 0 || this.x > canvas.width) this.vx *= -1;
+                if (this.y < 0 || this.y > canvas.height) this.vy *= -1;
+            }
+            draw() {
+                ctx.save();
+                ctx.shadowBlur = 10;
+                ctx.shadowColor = '#00ffff';
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, 2, 0, Math.PI * 2);
+                ctx.fillStyle = '#00ffff';
+                ctx.fill();
+                ctx.restore();
+            }
+        }
+
+        const particles = Array.from({ length: 50 }, () => new Particle());
+
+        function animate() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            particles.forEach(p => {
+                p.update();
+                p.draw();
+            });
+            for (let i = 0; i < particles.length; i++) {
+                for (let j = i + 1; j < particles.length; j++) {
+                    const dx = particles[i].x - particles[j].x;
+                    const dy = particles[i].y - particles[j].y;
+                    const distance = Math.sqrt(dx * dx + dy * dy);
+                    if (distance < 100) {
+                        ctx.save();
+                        ctx.shadowBlur = 5;
+                        ctx.shadowColor = '#00ffff';
+                        ctx.beginPath();
+                        ctx.moveTo(particles[i].x, particles[i].y);
+                        ctx.lineTo(particles[j].x, particles[j].y);
+                        ctx.strokeStyle = `rgba(0, 255, 255, ${1 - distance / 100})`;
+                        ctx.stroke();
+                        ctx.restore();
+                    }
+                }
+            }
+            requestAnimationFrame(animate);
+        }
+        animate();
+
+        window.addEventListener('resize', () => {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        });
+
+        window.speechSynthesis.onvoiceschanged = () => speak('Systems online. How may I assist you, sir?');
+    </script>
+</body>
+</html>
